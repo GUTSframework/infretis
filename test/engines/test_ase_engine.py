@@ -4,6 +4,7 @@ import pathlib
 import os
 
 import ase
+import ase.io
 import numpy as np
 import tomli
 
@@ -70,3 +71,26 @@ def test_propagate(tmp_path: pathlib.PosixPath):
     assert len(distances) == 10
     # check that order is [10, 9, 8, ..., 1]
     assert np.allclose(distances, np.linspace(10, 1, 10))
+
+
+def test_modify_velocities_uses_rgen(tmp_path: pathlib.PosixPath):
+    """Velocities come from the engine's random generator, so the same
+    seed gives the same velocities."""
+    h2_path = HERE / "../../examples/ase/H2"
+    with open(h2_path / "infretis0.toml", "rb") as rfile:
+        config = tomli.load(rfile)
+    config["engine"]["calculator_settings"]["module"] = str(
+        (h2_path / "H2-calc.py").resolve()
+    )
+    engine = create_engine(config)
+    engine.exe_dir = tmp_path
+
+    velocities = []
+    for seed in (7, 7, 8):
+        engine.rgen = np.random.default_rng(seed)
+        system = System()
+        system.set_pos((str((h2_path / "conf.traj").resolve()), 0))
+        engine.modify_velocities(system, {"zero_momentum": False})
+        velocities.append(ase.io.read(tmp_path / "genvel.traj").get_velocities())
+    assert np.array_equal(velocities[0], velocities[1])
+    assert not np.array_equal(velocities[0], velocities[2])

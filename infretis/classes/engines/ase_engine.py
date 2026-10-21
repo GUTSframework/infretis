@@ -225,7 +225,9 @@ class ASEEngine(EngineBase):
             atoms = atoms[0]
         kin_old = atoms.get_kinetic_energy()
 
-        MaxwellBoltzmannDistribution(atoms, temperature_K=self.temperature)
+        MaxwellBoltzmannDistribution(
+            atoms, temperature_K=self.temperature, rng=self.rgen
+        )
         kin_new = atoms.get_kinetic_energy()
         if vel_settings.get("zero_momentum", False):
             # TODO: should we preserve temperature or not?

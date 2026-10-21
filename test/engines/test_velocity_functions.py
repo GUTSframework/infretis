@@ -99,6 +99,7 @@ def return_ase_engine():
         calc_path.resolve()
     )
     engine = create_engine(config)
+    engine.rgen = np.random.default_rng()
     engine.input_path = HERE / "../../examples/ase/H2"
     engine.vel_settings = {
         "zero_momentum": True,
