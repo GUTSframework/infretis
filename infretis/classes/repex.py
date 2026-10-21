@@ -429,7 +429,8 @@ class REPEX_state:
     def set_rgen(self):
         """Set numpy random generator state from restart."""
         seed_sequence = np.random.SeedSequence(
-            entropy=0, n_children_spawned=self.cstep
+            entropy=self.config["simulation"]["seed"],
+            n_children_spawned=self.cstep,
         )
         self.rgen = default_rng(seed_sequence)
         self.rgen.bit_generator.state = self.config["current"]["rng_state"]

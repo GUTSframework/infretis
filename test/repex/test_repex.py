@@ -1,17 +1,19 @@
 import os
 from pathlib import PosixPath
+import pytest
 import tomli
 
 from infretis.classes.repex import REPEX_state, spawn_rng
 
 
-def test_rgen_io(tmp_path: PosixPath) -> None:
+@pytest.mark.parametrize("seed", [0, 2])
+def test_rgen_io(tmp_path: PosixPath, seed: int) -> None:
     """Test repex rgen and rgen spawn reproducability."""
     state = REPEX_state(
         {
             "current": {"size": 1, "cstep": 0},
             "runner": {"workers": 1},
-            "simulation": {"seed": 0, "steps":10,
+            "simulation": {"seed": seed, "steps":10,
                            "zeroswap": 0.5, "pick_scheme": 0},
         }
     )
