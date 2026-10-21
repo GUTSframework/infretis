@@ -1,3 +1,6 @@
+import concurrent.futures
+import threading
+import time
 from pathlib import PosixPath
 from time import sleep
 from typing import Dict, Any
@@ -157,3 +160,21 @@ def test_runner_infretis_mode(tmp_path: PosixPath):
         runner.stop()
         loop.close()
         asyncio.set_event_loop(None)
+
+
+def test_future_list_waits_without_spinning():
+    """as_completed returns futures as they finish and None when the list
+    is empty, and uses little CPU while it waits."""
+    futlist = future_list()
+    assert futlist.as_completed() is None
+    fut = concurrent.futures.Future()
+    futlist.add(fut)
+    timer = threading.Timer(0.5, fut.set_result, ("done",))
+    timer.start()
+    cpu0 = time.thread_time()
+    assert futlist.as_completed() is fut
+    cpu = time.thread_time() - cpu0
+    timer.join()
+    assert futlist.as_completed() is None
+    # A busy loop uses about the full 0.5 s.
+    assert cpu < 0.1

@@ -247,11 +247,11 @@ class future_list:
             return a future from the list, whenever it is done
             or return None when the list is empty.
         """
-        future_out = None
-        while len(self._futures) > 0 and not future_out:
+        while self._futures:
             for fut in list(self._futures):
                 if fut.done():
-                    future_out = fut
                     self._futures.remove(fut)
-                    break
-        return future_out
+                    return fut
+            # Sleep between checks, or the loop keeps a core busy.
+            time.sleep(0.005)
+        return None
