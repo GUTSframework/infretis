@@ -38,22 +38,32 @@ class aiorunner:
     workers on-the-fly.
     """
 
-    def __init__(self, config: Dict, n_workers: int = 1) -> None:
+    def __init__(
+        self,
+        config: Dict,
+        n_workers: int = 1,
+        executor_factory: Optional[
+            Callable[..., concurrent.futures.Executor]
+        ] = None,
+    ) -> None:
         """Init function of runner.
 
         Args:
             config: the configuration dictionary
             n_workers: number of workers active in the runner
+            executor_factory: a callable that takes the arguments of
+                concurrent.futures.ProcessPoolExecutor and returns the
+                executor that runs the tasks (default: ProcessPoolExecutor)
         """
+        if executor_factory is None:
+            executor_factory = concurrent.futures.ProcessPoolExecutor
         self._n_workers: int = n_workers
         self._counter = multiprocessing.get_context("spawn").Value("i", 0)
-        self._executor: concurrent.futures.Executor = (
-            concurrent.futures.ProcessPoolExecutor(
-                max_workers=n_workers,
-                initializer=worker_initializer,
-                initargs=(self._counter, config),
-                mp_context=multiprocessing.get_context("spawn"),
-            )
+        self._executor: concurrent.futures.Executor = executor_factory(
+            max_workers=n_workers,
+            initializer=worker_initializer,
+            initargs=(self._counter, config),
+            mp_context=multiprocessing.get_context("spawn"),
         )
         self._stop_event = asyncio.Event()
         self._loop = asyncio.new_event_loop()

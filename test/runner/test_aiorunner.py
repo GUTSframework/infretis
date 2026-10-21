@@ -178,3 +178,35 @@ def test_future_list_waits_without_spinning():
     assert futlist.as_completed() is None
     # A busy loop uses about the full 0.5 s.
     assert cpu < 0.1
+
+
+def test_runner_executor_factory(tmp_path: PosixPath):
+    """The runner builds its executor with the given factory."""
+    os.chdir(tmp_path)  # the worker initializer writes worker0.log
+    calls = []
+
+    def factory(**kwargs):
+        calls.append(kwargs)
+        return concurrent.futures.ThreadPoolExecutor(
+            max_workers=kwargs["max_workers"],
+            initializer=kwargs["initializer"],
+            initargs=kwargs["initargs"],
+        )
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        runner = aiorunner({}, 1, executor_factory=factory)
+        futlist = future_list()
+        runner.set_task(sleeping)
+        runner.start()
+        futlist.add(runner.submit_work({"duration": 0.1}))
+        fut = futlist.as_completed()
+        assert fut.result().get("Time slept") == 0.1
+    finally:
+        runner.stop()
+        loop.close()
+        asyncio.set_event_loop(None)
+    assert len(calls) == 1
+    assert calls[0]["max_workers"] == 1
+    assert calls[0]["initargs"][1] == {}

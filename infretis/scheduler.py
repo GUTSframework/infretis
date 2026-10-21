@@ -5,11 +5,18 @@ import copy
 from infretis.setup import setup_internal, setup_runner
 
 
-def scheduler(config):
-    """Run infretis loop."""
+def scheduler(config, executor_factory=None):
+    """Run infretis loop.
+
+    Args:
+        config: the configuration dictionary
+        executor_factory: a callable that takes the arguments of
+            concurrent.futures.ProcessPoolExecutor and returns the
+            executor that runs the MD moves (default: ProcessPoolExecutor)
+    """
     # setup repex, runner and futures
     md_items, state = setup_internal(config)
-    runner, futures = setup_runner(state)
+    runner, futures = setup_runner(state, executor_factory)
 
     # submit the first number of workers
     while state.initiate():

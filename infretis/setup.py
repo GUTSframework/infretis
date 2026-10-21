@@ -2,6 +2,8 @@
 
 import logging
 import os
+from collections.abc import Callable
+from concurrent.futures import Executor
 from typing import Optional, Tuple
 
 import tomli
@@ -62,14 +64,21 @@ def setup_internal(config: dict) -> Tuple[dict, REPEX_state]:
     return md_items, state
 
 
-def setup_runner(state: REPEX_state) -> Tuple[aiorunner, future_list]:
+def setup_runner(
+    state: REPEX_state,
+    executor_factory: Optional[Callable[..., Executor]] = None,
+) -> Tuple[aiorunner, future_list]:
     """Set the task runner class up.
 
     Args:
         state: A REPEX state from which to get the config dict
+        executor_factory: passed on to aiorunner (default:
+            ProcessPoolExecutor)
     """
     # setup client with state.workers workers
-    runner = aiorunner(state.config, state.config["runner"]["workers"])
+    runner = aiorunner(
+        state.config, state.config["runner"]["workers"], executor_factory
+    )
 
     # Attach the run_md task and start the runner's workers
     runner.set_task(run_md)
