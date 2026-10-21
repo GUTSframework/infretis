@@ -779,8 +779,13 @@ class REPEX_state:
             fracs = [str(i) for i in self.traj_data[key]["frac"]]
             self.config["current"]["frac"][str(key)] = fracs
 
-        with open("./restart.toml", "wb") as f:
+        # Write a temporary file and rename it, so that a crash during the
+        # write leaves the previous restart.toml intact.
+        with open("./.restart.toml.tmp", "wb") as f:
             tomli_w.dump(self.config, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace("./.restart.toml.tmp", "./restart.toml")
 
     def printing(self):
         """Check if print."""

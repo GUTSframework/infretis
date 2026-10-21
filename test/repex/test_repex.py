@@ -43,3 +43,30 @@ def test_rgen_io(tmp_path: PosixPath, seed: int) -> None:
         assert state.rgen.random() == rng
         child = spawn_rng(state.rgen)
         assert child.random() == child_rng
+
+
+def test_write_toml_keeps_old_file_on_failure(
+    tmp_path: PosixPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails halfway leaves the previous restart.toml intact."""
+    state = REPEX_state(
+        {
+            "current": {"size": 1, "cstep": 0},
+            "runner": {"workers": 1},
+            "simulation": {"seed": 0, "steps": 10,
+                           "zeroswap": 0.5, "pick_scheme": 0},
+        }
+    )
+    os.chdir(tmp_path)
+    state.write_toml()
+    before = (tmp_path / "restart.toml").read_bytes()
+
+    def dump_halfway(obj, f):
+        f.write(b"[current]\ncst")
+        raise OSError("disk full")
+
+    state.config["current"]["cstep"] = 1
+    monkeypatch.setattr("infretis.classes.repex.tomli_w.dump", dump_halfway)
+    with pytest.raises(OSError):
+        state.write_toml()
+    assert (tmp_path / "restart.toml").read_bytes() == before
