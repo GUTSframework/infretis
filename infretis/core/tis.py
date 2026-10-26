@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+from infretis.classes.formatter import get_log_formatter
 from infretis.classes.path import paste_paths
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -15,10 +18,13 @@ logger.addHandler(logging.NullHandler())
 
 
 ENGINES: dict = {}
+# What a worker logs before its first move, held until that move opens
+# its worker log (see hold_early_log).
+EARLY_LOG: Optional[logging.handlers.MemoryHandler] = None
 
 
 if TYPE_CHECKING:  # pragma: no cover
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from numpy.random import Generator
 
@@ -51,8 +57,53 @@ def log_mdlogs(inp: str) -> None:
                     )
 
 
+def hold_early_log() -> None:
+    """Hold what this worker logs from now until its first move, which
+    writes it to its worker log (the worker has no pin before that)."""
+    global EARLY_LOG
+    EARLY_LOG = logging.handlers.MemoryHandler(
+        capacity=10000, flushLevel=logging.CRITICAL + 1
+    )
+    EARLY_LOG.setLevel(logging.INFO)
+    logging.getLogger("").addHandler(EARLY_LOG)
+
+
+@contextmanager
+def worker_log(pin: int) -> Iterator[None]:
+    """Log to worker{pin}.log, next to the pin's folder worker{pin}/.
+
+    A worker process may run moves of different pins, one after another,
+    so the log file is chosen per move, not per process. The handler is
+    on the root logger, so moves must run in processes of their own:
+    moves running as threads of one process would each log to the files
+    of all of them.
+    """
+    global EARLY_LOG
+    root = logging.getLogger("")
+    name = f"worker{pin}.log"
+    new = not os.path.isfile(name)
+    handler = logging.FileHandler(name, mode="a")
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(get_log_formatter(logging.INFO))
+    root.addHandler(handler)
+    try:
+        if new:
+            root.info("=============================")
+            root.info("Logging file for worker %s", pin)
+            root.info("=============================\n")
+        if EARLY_LOG is not None:
+            root.removeHandler(EARLY_LOG)
+            EARLY_LOG.setTarget(handler)
+            EARLY_LOG.close()  # writes what it held to the handler
+            EARLY_LOG = None
+        yield
+    finally:
+        root.removeHandler(handler)
+        handler.close()
+
+
 def run_md(md_items: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute shooting moves that require MD.
+    """Execute shooting moves that require MD, logging to worker{pin}.log.
 
     Args:
         md_items: Parameters and objects needed by the MD simulation.
@@ -61,6 +112,12 @@ def run_md(md_items: Dict[str, Any]) -> Dict[str, Any]:
         The updated `md_items` dictionary with additional results from
         the MD simulation.
     """
+    with worker_log(md_items["pin"]):
+        return _run_md(md_items)
+
+
+def _run_md(md_items: Dict[str, Any]) -> Dict[str, Any]:
+    """Do what run_md does, without choosing the log file."""
     # perform the hw move:
     picked = md_items["picked"]
     subcycles0 = np.sum([i.steps for j in ENGINES.values() for i in j])

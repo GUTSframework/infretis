@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional
 
 import infretis.core.tis
 from infretis.classes.engines.factory import create_engines
-from infretis.classes.formatter import get_log_formatter
 from infretis.classes.orderparameter import create_orderparameters
 
 logger = logging.getLogger("")
@@ -65,11 +64,10 @@ class aiorunner:
         if executor_factory is None:
             executor_factory = concurrent.futures.ProcessPoolExecutor
         self._n_workers: int = n_workers
-        self._counter = multiprocessing.get_context("spawn").Value("i", 0)
         self._executor: concurrent.futures.Executor = executor_factory(
             max_workers=n_workers,
             initializer=worker_initializer,
-            initargs=(self._counter, config),
+            initargs=(config,),
             mp_context=multiprocessing.get_context("spawn"),
         )
         self._stop_event = asyncio.Event()
@@ -224,8 +222,13 @@ class aiorunner:
         self._thread.join()
 
 
-def worker_initializer(counter, config):
+def worker_initializer(config):
     """Initialize function for each worker process.
+
+    Creates the engines and order parameters. Each move logs to the
+    worker{pin}.log of the pin it runs on (see core.tis.run_md), so the
+    initializer needs no shared state: it also works with an executor
+    whose workers share no memory with this process.
 
     On SIGTERM, the worker raises WorkerTerminated, so the move it runs
     unwinds: the engines then stop the MD programs they started in
@@ -233,6 +236,7 @@ def worker_initializer(counter, config):
     """
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGTERM, _raise_terminated)
+    infretis.core.tis.hold_early_log()
     # load engines if infretis simulation
     if "simulation" in config:
         engines, _ = create_engines(config)
@@ -240,17 +244,6 @@ def worker_initializer(counter, config):
 
         # set the ENGINES variable in the tis file for each worker
         infretis.core.tis.ENGINES = engines
-    with counter.get_lock():  # Ensure that counter increment is thread-safe
-        worker_id = counter.value
-        counter.value += 1
-    fileh = logging.FileHandler(f"worker{worker_id}.log", mode="a")
-    log_levl = getattr(logging, "info".upper(), logging.INFO)
-    fileh.setLevel(log_levl)
-    fileh.setFormatter(get_log_formatter(log_levl))
-    logger.addHandler(fileh)
-    logger.info("=============================")
-    logger.info("Logging file for worker %s", worker_id)
-    logger.info("=============================\n")
 
 
 def _raise_terminated(signum, frame):

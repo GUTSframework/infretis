@@ -180,9 +180,8 @@ def test_future_list_waits_without_spinning():
     assert cpu < 0.1
 
 
-def test_runner_executor_factory(tmp_path: PosixPath):
+def test_runner_executor_factory():
     """The runner builds its executor with the given factory."""
-    os.chdir(tmp_path)  # the worker initializer writes worker0.log
     calls = []
 
     def factory(**kwargs):
@@ -209,7 +208,7 @@ def test_runner_executor_factory(tmp_path: PosixPath):
         asyncio.set_event_loop(None)
     assert len(calls) == 1
     assert calls[0]["max_workers"] == 1
-    assert calls[0]["initargs"][1] == {}
+    assert calls[0]["initargs"] == ({},)
 
 
 def md_program(folder: str) -> None:
@@ -242,7 +241,7 @@ def test_sigterm_to_a_worker_stops_its_md_program(tmp_path, monkeypatch):
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=1,
         initializer=worker_initializer,
-        initargs=(context.Value("i", 0), {}),
+        initargs=({},),
         mp_context=context,
     ) as executor:
         future = executor.submit(md_program, str(tmp_path))
