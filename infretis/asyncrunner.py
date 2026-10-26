@@ -5,6 +5,7 @@ import concurrent.futures
 import functools
 import logging
 import multiprocessing
+import signal
 import threading
 import time
 from asyncio import Future
@@ -22,6 +23,12 @@ logger.setLevel(logging.DEBUG)
 
 class RunnerError(Exception):
     """Exception class for the runner."""
+
+    pass
+
+
+class WorkerTerminated(Exception):
+    """Raised in a worker that got SIGTERM, to end the task it runs."""
 
     pass
 
@@ -218,7 +225,14 @@ class aiorunner:
 
 
 def worker_initializer(counter, config):
-    """Initialize function for each worker process."""
+    """Initialize function for each worker process.
+
+    On SIGTERM, the worker raises WorkerTerminated, so the move it runs
+    unwinds: the engines then stop the MD programs they started in
+    sessions of their own, which the signal does not reach.
+    """
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _raise_terminated)
     # load engines if infretis simulation
     if "simulation" in config:
         engines, _ = create_engines(config)
@@ -237,6 +251,12 @@ def worker_initializer(counter, config):
     logger.info("=============================")
     logger.info("Logging file for worker %s", worker_id)
     logger.info("=============================\n")
+
+
+def _raise_terminated(signum, frame):
+    """Raise WorkerTerminated; a second SIGTERM ends the worker at once."""
+    signal.signal(signum, signal.SIG_DFL)
+    raise WorkerTerminated(f"worker got {signal.Signals(signum).name}")
 
 
 class future_list:

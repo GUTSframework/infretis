@@ -210,3 +210,56 @@ def test_runner_executor_factory(tmp_path: PosixPath):
     assert len(calls) == 1
     assert calls[0]["max_workers"] == 1
     assert calls[0]["initargs"][1] == {}
+
+
+def md_program(folder: str) -> None:
+    """Start a program in a session of its own and wait for it, as the
+    engines do; stop it when the wait ends with an exception."""
+    import signal
+    import subprocess
+
+    proc = subprocess.Popen(["sleep", "60"], preexec_fn=os.setsid)
+    try:
+        with open(os.path.join(folder, "pids"), "w") as f:
+            f.write(f"{os.getpid()} {proc.pid}")
+        proc.wait()
+    finally:
+        if proc.returncode is None:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            proc.wait()
+
+
+def test_sigterm_to_a_worker_stops_its_md_program(tmp_path, monkeypatch):
+    """A worker ended by SIGTERM unwinds its task, so the program the
+    task started in its own session does not outlive it."""
+    import multiprocessing
+    import signal
+
+    from infretis.asyncrunner import WorkerTerminated, worker_initializer
+
+    monkeypatch.chdir(tmp_path)
+    context = multiprocessing.get_context("spawn")
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=1,
+        initializer=worker_initializer,
+        initargs=(context.Value("i", 0), {}),
+        mp_context=context,
+    ) as executor:
+        future = executor.submit(md_program, str(tmp_path))
+        pids = tmp_path / "pids"
+        for _ in range(200):
+            if pids.is_file() and pids.read_text():
+                break
+            sleep(0.05)
+        worker, program = map(int, pids.read_text().split())
+        try:
+            os.kill(worker, signal.SIGTERM)
+            with pytest.raises(WorkerTerminated):
+                future.result(timeout=30)
+            with pytest.raises(ProcessLookupError):
+                os.kill(program, 0)
+        finally:
+            try:
+                os.kill(program, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
