@@ -100,7 +100,9 @@ def setup_config(
         re_inp: a string specifying the restart file (def: restart.toml)
 
     Return
-        A dictionary containing the configuration parameters or None
+        A dictionary containing the configuration parameters, or None
+        when there is nothing to run: a warning on the "main" logger
+        says why (on stderr, if logging is not configured otherwise).
     """
     # sets up the dict from *toml file.
 
@@ -109,7 +111,7 @@ def setup_config(
         with open(inp, mode="rb") as read:
             config = tomli.load(read)
     else:
-        logger.info("%s file not found, exit.", inp)
+        logger.warning("%s file not found, exit.", inp)
         return None
 
     # check if restart.toml exist
@@ -120,19 +122,48 @@ def setup_config(
     # in case we restart, toml file has a 'current' subdict.
     if "current" in config:
         curr = config["current"]
+        cstep = curr["cstep"]
+        steps = config["simulation"]["steps"]
 
-        # if cstep and steps are equal, we stop here.
-        if curr.get("cstep") == curr.get("restarted_from", -1):
+        # A finished run: return before 'restarted_from' is set below,
+        # which would be saved and then refuse continuing with more steps.
+        if cstep >= steps:
+            logger.warning(
+                "%s: the run is done (cstep %s, steps %s). To continue it, "
+                "raise steps under [simulation].",
+                inp,
+                cstep,
+                steps,
+            )
+            return None
+
+        # The last launch from this file ran no step.
+        if cstep == curr.get("restarted_from", -1):
+            logger.warning(
+                "%s: cstep and restarted_from are both %s: the last launch "
+                "from it ran no step. To launch it again, delete "
+                "restarted_from under [current].",
+                inp,
+                cstep,
+            )
             return None
 
         # set 'restarted_from'
-        curr["restarted_from"] = config["current"]["cstep"]
+        curr["restarted_from"] = cstep
 
         # check active paths:
         load_dir = config["simulation"].get("load_dir", "trajs")
         for act in config["current"]["active"]:
             store_p = os.path.join(load_dir, str(act), "traj.txt")
             if not os.path.isfile(store_p):
+                logger.warning(
+                    "%s: active path %s is missing (%s); a restart needs "
+                    "the %s/ saved with it.",
+                    inp,
+                    act,
+                    store_p,
+                    load_dir,
+                )
                 return None
     else:
         # no 'current' in toml, start from step 0.
