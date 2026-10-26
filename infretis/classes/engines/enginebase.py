@@ -131,6 +131,22 @@ class EngineBase(metaclass=ABCMeta):
     def set_mdrun(self, md_items: Dict[str, Any]) -> None:
         """Set exe_dir and worker terminal command to be run."""
 
+    def shared_inputs(self) -> Dict[Path, bytes]:
+        """The input files every copy of this engine reads during moves.
+
+        Returns:
+            Their paths and contents, as `write_shared_inputs` writes
+            them. Engines that read no such files return nothing.
+        """
+        return {}
+
+    def write_shared_inputs(self) -> None:
+        """Write the files of `shared_inputs` (and anything made from them).
+
+        Called once per engine, by `create_engines` at setup, before any
+        move runs; never in the workers, whose moves read these files.
+        """
+
     def calculate_order(
         self,
         system: System,

@@ -266,7 +266,8 @@ def worker_initializer(config):
     infretis.core.tis.hold_early_log()
     # load engines if infretis simulation
     if "simulation" in config:
-        engines, _ = create_engines(config)
+        # The parent wrote the engines' input files at setup.
+        engines, _ = create_engines(config, write_inputs=False)
         create_orderparameters(engines, config)
 
         # set the ENGINES variable in the tis file for each worker

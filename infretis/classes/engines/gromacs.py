@@ -9,6 +9,7 @@ import shutil
 import signal
 import struct
 import subprocess
+import tempfile
 from io import BufferedReader, BufferedWriter
 from pathlib import Path
 from time import sleep
@@ -237,14 +238,32 @@ class GromacsEngine(EngineBase):
         if not write_force:
             settings["nstfout"] = 0
 
-        # Create the .mdp file name:
+        # The .mdp file every move reads, and the .tpr made from it; both
+        # are written by write_shared_inputs, once, at setup:
         self.input_files["input"] = os.path.join(
             self.input_path, "infretis.mdp"
         )
+        self.input_files["tpr"] = os.path.join(self.input_path, "topol.tpr")
+        self._mdp_settings = settings
+        self.exe_dir = str(self.input_path)
+
+    def shared_inputs(self) -> Dict[Path, bytes]:
+        """Return the .mdp file that every move reads, as it is written."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mdp = Path(tmp) / "infretis.mdp"
+            self._modify_input(
+                self.input_files["input_o"], mdp, self._mdp_settings, delim="="
+            )
+            return {
+                Path(self.input_files["input"]).resolve(): mdp.read_bytes()
+            }
+
+    def write_shared_inputs(self) -> None:
+        """Write the .mdp file and check it with grompp, making the .tpr."""
         self._modify_input(
             self.input_files["input_o"],
             self.input_files["input"],
-            settings,
+            self._mdp_settings,
             delim="=",
         )
         logger.info(

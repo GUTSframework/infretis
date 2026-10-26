@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if importlib.util.find_spec("scm") is not None:
     if importlib.util.find_spec("scm.plams") is not None:
@@ -27,7 +28,9 @@ logger.addHandler(logging.NullHandler())
 
 
 def create_engine(
-    settings: Dict[str, Any], eng_key: str = "engine"
+    settings: Dict[str, Any],
+    eng_key: str = "engine",
+    write_inputs: bool = True,
 ) -> Optional[EngineBase]:
     """Create an engine from settings.
 
@@ -35,6 +38,9 @@ def create_engine(
         settings: Settings for the simulation. This method will
             use the `"engine"` section of the settings.
         eng_key: The key to the specific engine.
+        write_inputs: Write the input files that the engine's moves read
+            (see `EngineBase.write_shared_inputs`). `create_engines` passes
+            False, and writes them once for all the engines it creates.
 
     Returns:
         The engine created here.
@@ -55,11 +61,13 @@ def create_engine(
     if settings[eng_key]["class"].lower() not in engine_map:
         return create_external(settings[eng_key], "engine", [])
     engine = generic_factory(settings[eng_key], engine_map, name="engine")
+    if write_inputs and engine is not None:
+        engine.write_shared_inputs()
     return engine
 
 
 def create_engines(
-    config: Dict[str, Any],
+    config: Dict[str, Any], write_inputs: bool = True
 ) -> Tuple[Dict[Any, EngineBase], Dict[Any, int]]:
     """Create the engines for a infretis simulation.
 
@@ -78,10 +86,19 @@ def create_engines(
 
     Args:
         config: The config dict that is setup from the .toml file.
+        write_inputs: Write the input files that the engines' moves read
+            (see `EngineBase.write_shared_inputs`). True at setup; False
+            in the workers, whose moves read these files at the same time.
 
     Returns:
         engines: A dictionary containing lists of engine instances
         engine_occ: A dictionary containing lists of worker pins
+
+    Raises:
+        ValueError: if engines would write the same input file with
+            different contents (as two GROMACS engines with different
+            settings and one input_path): the moves of one of them would
+            run with the other's settings.
 
     """
     engine_count: dict = {}
@@ -99,9 +116,43 @@ def create_engines(
         for i in range(n_create):
             check_engine(config, eng_key=engine)
             engine_occ[engine].append(-1)
-            engines[engine].append(create_engine(config, eng_key=engine))
+            engines[engine].append(
+                create_engine(config, eng_key=engine, write_inputs=False)
+            )
+
+    if write_inputs:
+        for name in check_shared_inputs(engines):
+            engines[name][0].write_shared_inputs()  # the copies write the same
 
     return engines, engine_occ
+
+
+def check_shared_inputs(engines: Dict[Any, list]) -> List[Any]:
+    """Refuse engines that would write one input file differently.
+
+    Args:
+        engines: The engines, as create_engines makes them.
+
+    Returns:
+        The names of the engines whose inputs to write: an engine whose
+        files an engine before it writes the same is left out.
+    """
+    written: Dict[Path, Tuple[Any, bytes]] = {}
+    to_write = []
+    for name, copies in engines.items():
+        inputs = copies[0].shared_inputs()
+        if not inputs or any(path not in written for path in inputs):
+            to_write.append(name)
+        for path, content in inputs.items():
+            first = written.setdefault(path, (name, content))
+            if first[1] != content:
+                msg = (
+                    f"Engines '{first[0]}' and '{name}' write {path} with "
+                    "different settings, and the moves of both read it. "
+                    "Give each engine its own input_path."
+                )
+                raise ValueError(msg)
+    return to_write
 
 
 def check_engine(settings: Dict[str, Any], eng_key: str) -> bool:
