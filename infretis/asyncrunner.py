@@ -221,6 +221,33 @@ class aiorunner:
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join()
 
+    def cancel(self) -> None:
+        """Terminate the runner now, without waiting for the tasks.
+
+        Queued tasks are cancelled and the worker processes of a
+        ProcessPoolExecutor are terminated; another executor is asked to
+        cancel its futures. Results of tasks that were running are lost.
+        """
+        # shutdown() forgets the processes, so collect them first.
+        processes = list(
+            (getattr(self._executor, "_processes", None) or {}).values()
+        )
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        for process in processes:
+            process.terminate()
+        asyncio.run_coroutine_threadsafe(
+            self._cancel_tasks(), self._loop
+        ).result(timeout=10)
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join()
+
+    async def _cancel_tasks(self) -> None:
+        """Cancel the background tasks and wait until they have ended."""
+        self._stop_event.set()
+        for task in self._tasks or []:
+            task.cancel()
+        await asyncio.gather(*(self._tasks or []), return_exceptions=True)
+
 
 def worker_initializer(config):
     """Initialize function for each worker process.
@@ -263,14 +290,22 @@ class future_list:
         """Add a future to list."""
         self._futures.append(future)
 
-    def as_completed(self) -> Optional[asyncio.Future]:
+    def as_completed(
+        self, stop: Optional[Callable[[], bool]] = None
+    ) -> Optional[asyncio.Future]:
         """Get future as they are done.
+
+        Args:
+            stop: if given, stop waiting once it returns True
 
         Return:
             return a future from the list, whenever it is done
-            or return None when the list is empty.
+            or return None when the list is empty, or when `stop`
+            returns True.
         """
         while self._futures:
+            if stop is not None and stop():
+                return None
             for fut in list(self._futures):
                 if fut.done():
                     self._futures.remove(fut)
